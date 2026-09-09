@@ -1,14 +1,3 @@
-"""
-Same OnlineZoneLearner concept validated in the research notebook, adapted to:
-- load a pretrained model from disk on startup instead of training from scratch
-- persist every prediction + outcome to a CSV log (survives restarts)
-- reload accumulated live history on startup so retraining picks up where it left off
-
-Uses XGBoost's native save_model/load_model (JSON format) instead of joblib/pickle --
-portable across XGBoost versions and platforms, avoiding "input stream corrupted"
-errors when the training environment (Colab) and deployment environment (e.g. Windows)
-have different XGBoost versions installed.
-"""
 import json
 import logging
 import pandas as pd
@@ -44,7 +33,7 @@ class OnlineZoneLearner:
             logger.info("Loaded %d historical live trades from %s", len(self.history_df), self.trade_log_path)
         else:
             cols = self.feature_cols + [
-                "timestamp", "ticket", "direction", "entry_price",
+                "symbol", "timestamp", "ticket", "direction", "entry_price",
                 "predicted_proba_up", "predicted_class", "status",
                 "exit_price", "outcome", "correct",
             ]
@@ -60,21 +49,20 @@ class OnlineZoneLearner:
         pred_class = 1 if proba_up > 0.5 else 0
         return proba_up, pred_class
 
-    def log_open_trade(self, features_dict, timestamp, ticket, direction, entry_price,
+    def log_open_trade(self, symbol, features_dict, timestamp, ticket, direction, entry_price,
                         proba_up, pred_class):
         row = dict(features_dict)
         row.update({
-            "timestamp": timestamp, "ticket": ticket, "direction": direction,
+            "symbol": symbol, "timestamp": timestamp, "ticket": ticket, "direction": direction,
             "entry_price": entry_price, "predicted_proba_up": proba_up,
             "predicted_class": pred_class, "status": "open",
             "exit_price": None, "outcome": None, "correct": None,
         })
         self.history_df = pd.concat([self.history_df, pd.DataFrame([row])], ignore_index=True)
         self._save_log()
-        return len(self.history_df) - 1  # row index for later update
+        return len(self.history_df) - 1
 
     def record_outcome(self, row_index, exit_price, outcome):
-        """outcome: 1 if price broke up, 0 if it broke down (same convention as training)."""
         self.history_df.loc[row_index, "status"] = "closed"
         self.history_df.loc[row_index, "exit_price"] = exit_price
         self.history_df.loc[row_index, "outcome"] = outcome
@@ -107,8 +95,10 @@ class OnlineZoneLearner:
     def open_trades(self):
         return self.history_df[self.history_df["status"] == "open"]
 
-    def running_accuracy(self, window=50):
+    def running_accuracy(self, window=50, symbol=None):
         closed = self.history_df[self.history_df["status"] == "closed"]
+        if symbol is not None:
+            closed = closed[closed["symbol"] == symbol]
         if len(closed) == 0:
             return None
         recent = closed.tail(window)

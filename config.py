@@ -10,13 +10,18 @@ def _bool(val, default=False):
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _symbol_list(val, default="SPY"):
+    raw = val if val else default
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
 class Config:
-    # Market data
-    SYMBOL = os.getenv("SYMBOL", "EURUSD=X")
+    # Market data -- list of symbols, comma-separated in the env var
+    SYMBOLS = _symbol_list(os.getenv("SYMBOLS"), default="SPY")
     INTERVAL = os.getenv("INTERVAL", "5m")
     BARS_LOOKBACK = int(os.getenv("BARS_LOOKBACK", "200"))
 
-    # Virtual account
+    # Virtual account -- position size applies PER symbol
     STARTING_BALANCE = float(os.getenv("STARTING_BALANCE", "10000"))
     POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "1000"))
     SPREAD_PCT = float(os.getenv("SPREAD_PCT", "0.02"))
@@ -42,7 +47,7 @@ class Config:
     ENABLE_RETRAINING = _bool(os.getenv("ENABLE_RETRAINING"), default=False)
 
     # Paths
-    MODEL_PATH = os.getenv("MODEL_PATH", "models/model.joblib")
+    MODEL_PATH = os.getenv("MODEL_PATH", "models/model.json")
     FEATURE_COLS_PATH = os.getenv("FEATURE_COLS_PATH", "models/feature_cols.json")
     TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", "logs/trade_log.csv")
     EQUITY_LOG_PATH = os.getenv("EQUITY_LOG_PATH", "logs/equity_log.csv")

@@ -1,14 +1,13 @@
-from fastapi.staticfiles import StaticFiles
 import asyncio
 import json
-import xgboost as xgb
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-import joblib
+import xgboost as xgb
 import pandas as pd
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
@@ -47,23 +46,34 @@ def status():
     closed = df[df["status"] == "closed"]
     open_trades = df[df["status"] == "open"]
 
-    current_price = None
-    try:
-        bars = get_recent_bars(n_bars=2)
-        current_price = float(bars["close"].iloc[-1])
-    except Exception:
-        pass
+    current_prices = {}
+    for symbol in config.SYMBOLS:
+        try:
+            bars = get_recent_bars(symbol=symbol, n_bars=2)
+            current_prices[symbol] = float(bars["close"].iloc[-1])
+        except Exception:
+            pass
+
+    per_symbol = {}
+    for symbol in config.SYMBOLS:
+        sym_closed = closed[closed.get("symbol") == symbol] if "symbol" in closed.columns else closed.iloc[0:0]
+        per_symbol[symbol] = {
+            "current_price": current_prices.get(symbol),
+            "has_open_position": engine.broker.has_open_position(symbol),
+            "closed_trades": len(sym_closed),
+            "accuracy": float(sym_closed["correct"].astype(float).mean()) if len(sym_closed) > 0 else None,
+        }
 
     return {
-        "symbol": config.SYMBOL,
+        "symbols": config.SYMBOLS,
         "interval": config.INTERVAL,
         "paused": engine.paused,
         "confidence_threshold": config.CONFIDENCE_THRESHOLD,
         "retraining_enabled": config.ENABLE_RETRAINING,
         "starting_balance": config.STARTING_BALANCE,
         "current_balance": engine.broker.balance,
-        "current_equity": engine.broker.equity(current_price),
-        "has_open_position": engine.broker.has_open_position(),
+        "current_equity": engine.broker.equity(current_prices),
+        "open_positions": list(engine.broker.open_positions.keys()),
         "total_trades": len(df),
         "open_trades": len(open_trades),
         "closed_trades": len(closed),
@@ -71,16 +81,19 @@ def status():
         "recent_accuracy_last_50": (
             float(closed.tail(50)["correct"].astype(float).mean()) if len(closed) > 0 else None
         ),
+        "per_symbol": per_symbol,
     }
 
 
 @app.get("/history")
-def history(limit: int = 50):
+def history(limit: int = 50, symbol: str = None):
     log_path = Path(config.TRADE_LOG_PATH)
     if not log_path.exists():
         return {"trades": []}
     df = pd.read_csv(log_path)
-    cols = ["timestamp", "ticket", "direction", "entry_price", "exit_price",
+    if symbol and "symbol" in df.columns:
+        df = df[df["symbol"] == symbol]
+    cols = ["symbol", "timestamp", "ticket", "direction", "entry_price", "exit_price",
             "predicted_proba_up", "predicted_class", "outcome", "correct", "status"]
     cols = [c for c in cols if c in df.columns]
     return {"trades": df[cols].tail(limit).to_dict(orient="records")}
@@ -96,6 +109,7 @@ def equity_curve(limit: int = 500):
 
 
 class PredictionResponse(BaseModel):
+    symbol: Optional[str] = None
     setup_found: bool
     leg_in_direction: Optional[str] = None
     predicted_direction: Optional[str] = None
@@ -105,15 +119,16 @@ class PredictionResponse(BaseModel):
 
 
 @app.get("/predict_now", response_model=PredictionResponse)
-def predict_now():
+def predict_now(symbol: str = None):
+    symbol = symbol or config.SYMBOLS[0]
     n_bars_needed = max(
         config.BARS_LOOKBACK,
         config.CONTEXT_LOOKBACK + config.LEG_IN_LOOKBACK + config.BASE_LEN_MAX + 10,
     )
     try:
-        bars = get_recent_bars(n_bars=n_bars_needed)
+        bars = get_recent_bars(symbol=symbol, n_bars=n_bars_needed)
     except StaleDataError:
-        return PredictionResponse(setup_found=False)
+        return PredictionResponse(symbol=symbol, setup_found=False)
 
     close = bars["close"].values
     high = bars["high"].values
@@ -122,7 +137,7 @@ def predict_now():
 
     setup = get_most_recent_base(close, high, low, volume, recency_bars=3)
     if setup is None:
-        return PredictionResponse(setup_found=False)
+        return PredictionResponse(symbol=symbol, setup_found=False)
 
     with open(config.FEATURE_COLS_PATH) as f:
         feature_cols = json.load(f)
@@ -134,6 +149,7 @@ def predict_now():
     confidence = max(proba_up, 1 - proba_up)
 
     return PredictionResponse(
+        symbol=symbol,
         setup_found=True,
         leg_in_direction="up" if setup["features"]["leg_in_direction"] == 1 else "down",
         predicted_direction="up" if proba_up > 0.5 else "down",
@@ -141,6 +157,12 @@ def predict_now():
         confidence=confidence,
         would_trade=confidence >= config.CONFIDENCE_THRESHOLD,
     )
+
+
+@app.get("/predict_all")
+def predict_all():
+    """Convenience endpoint: predict_now for every configured symbol in one call."""
+    return {symbol: predict_now(symbol=symbol) for symbol in config.SYMBOLS}
 
 
 @app.post("/pause")
@@ -162,4 +184,7 @@ def resume():
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+# keep this LAST so it doesn't shadow the API routes above
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

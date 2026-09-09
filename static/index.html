@@ -6,48 +6,20 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0f1115;
-    --card: #171a21;
-    --border: #262a33;
-    --text: #e6e8ec;
-    --muted: #8b93a1;
-    --green: #3ecf8e;
-    --red: #ef5b5b;
-    --accent: #5b8def;
+    --bg: #0f1115; --card: #171a21; --border: #262a33; --text: #e6e8ec;
+    --muted: #8b93a1; --green: #3ecf8e; --red: #ef5b5b; --accent: #5b8def;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    padding: 24px;
-  }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; }
   h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
   .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 12px;
-    margin-bottom: 24px;
-  }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
   .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
   .card .value { font-size: 22px; font-weight: 600; margin-top: 6px; }
   .value.positive { color: var(--green); }
   .value.negative { color: var(--red); }
-  .panel {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px;
-    margin-bottom: 24px;
-  }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 24px; }
   .panel h2 { font-size: 14px; margin: 0 0 16px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
@@ -58,25 +30,17 @@
   .badge.open { background: rgba(91,141,239,0.15); color: var(--accent); }
   .badge.correct { color: var(--green); }
   .badge.incorrect { color: var(--red); }
-  .controls { display: flex; gap: 10px; margin-bottom: 24px; }
-  button {
-    background: var(--card);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 8px 16px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 13px;
-  }
+  .badge.symbol { background: rgba(255,255,255,0.06); color: var(--text); }
+  .controls { display: flex; gap: 10px; margin-bottom: 24px; align-items: center; }
+  button { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   button:hover { border-color: var(--accent); }
   button.active { border-color: var(--green); color: var(--green); }
-  #predictBox {
-    font-size: 13px;
-    color: var(--muted);
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-  }
+  select { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+  .symbol-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .symbol-panel { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .symbol-panel h3 { margin: 0 0 8px; font-size: 14px; }
+  .symbol-panel .row { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-top: 4px; }
+  #predictBox { font-size: 13px; color: var(--muted); margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
   .dot.live { background: var(--green); }
   .dot.paused { background: var(--muted); }
@@ -91,12 +55,18 @@
   <button id="pauseBtn" onclick="pauseLoop()">Pause</button>
   <button id="resumeBtn" onclick="resumeLoop()">Resume</button>
   <button onclick="refreshAll()">Refresh now</button>
+  <select id="predictSymbolSelect" onchange="refreshPredict()"></select>
 </div>
 
 <div class="grid" id="statusGrid"></div>
 
 <div class="panel">
-  <h2>Equity Curve</h2>
+  <h2>Per-Symbol Breakdown</h2>
+  <div class="symbol-panels" id="symbolPanels"></div>
+</div>
+
+<div class="panel">
+  <h2>Equity Curve (combined)</h2>
   <canvas id="equityChart" height="80"></canvas>
 </div>
 
@@ -110,7 +80,7 @@
   <table>
     <thead>
       <tr>
-        <th>Time</th><th>Direction</th><th>Entry</th><th>Exit</th>
+        <th>Symbol</th><th>Time</th><th>Direction</th><th>Entry</th><th>Exit</th>
         <th>Confidence</th><th>Status</th><th>Outcome</th>
       </tr>
     </thead>
@@ -121,6 +91,7 @@
 <script>
 const REFRESH_MS = 15000;
 let chart;
+let symbols = [];
 
 function fmt(n, decimals = 2) {
   if (n === null || n === undefined) return "—";
@@ -134,18 +105,20 @@ async function fetchJSON(path, opts) {
 }
 
 function renderStatus(s) {
+  symbols = s.symbols || [];
+
   document.getElementById("subtitle").innerHTML =
     `<span class="dot ${s.paused ? 'paused' : 'live'}"></span>` +
-    `${s.symbol} · ${s.interval} · confidence ≥ ${s.confidence_threshold} · ` +
+    `${symbols.join(" · ")} · ${s.interval} · confidence ≥ ${s.confidence_threshold} · ` +
     `retraining ${s.retraining_enabled ? "on" : "off"}`;
 
   const pnl = s.current_equity !== undefined ? s.current_equity - s.starting_balance : null;
   const pnlClass = pnl > 0 ? "positive" : pnl < 0 ? "negative" : "";
 
   const cards = [
-    { label: "Equity", value: `$${fmt(s.current_equity)}` , cls: pnlClass },
+    { label: "Equity (combined)", value: `$${fmt(s.current_equity)}`, cls: pnlClass },
     { label: "P&L", value: `${pnl >= 0 ? "+" : ""}$${fmt(pnl)}`, cls: pnlClass },
-    { label: "Position", value: s.has_open_position ? "Open" : "None", cls: "" },
+    { label: "Open Positions", value: (s.open_positions || []).join(", ") || "None", cls: "" },
     { label: "Trades (closed)", value: s.closed_trades, cls: "" },
     { label: "Accuracy (all time)", value: pct(s.overall_accuracy), cls: "" },
     { label: "Accuracy (last 50)", value: pct(s.recent_accuracy_last_50), cls: "" },
@@ -157,24 +130,40 @@ function renderStatus(s) {
 
   document.getElementById("pauseBtn").classList.toggle("active", s.paused);
   document.getElementById("resumeBtn").classList.toggle("active", !s.paused);
+
+  // per-symbol panels
+  const perSym = s.per_symbol || {};
+  document.getElementById("symbolPanels").innerHTML = symbols.map(sym => {
+    const d = perSym[sym] || {};
+    return `<div class="symbol-panel">
+      <h3>${sym}</h3>
+      <div class="row"><span>Price</span><span>${fmt(d.current_price, 5)}</span></div>
+      <div class="row"><span>Position</span><span>${d.has_open_position ? "Open" : "None"}</span></div>
+      <div class="row"><span>Closed trades</span><span>${d.closed_trades ?? 0}</span></div>
+      <div class="row"><span>Accuracy</span><span>${pct(d.accuracy)}</span></div>
+    </div>`;
+  }).join("");
+
+  // populate the predict-now symbol dropdown once
+  const select = document.getElementById("predictSymbolSelect");
+  if (select.options.length !== symbols.length) {
+    select.innerHTML = symbols.map(sym => `<option value="${sym}">${sym}</option>`).join("");
+  }
 }
 
 function renderHistory(trades) {
   const rows = trades.slice().reverse().map(t => {
     const dirBadge = `<span class="badge ${t.direction === 'buy' ? 'buy' : 'sell'}">${t.direction.toUpperCase()}</span>`;
-    const statusBadge = t.status === 'open'
-      ? `<span class="badge open">OPEN</span>`
-      : t.status;
+    const statusBadge = t.status === 'open' ? `<span class="badge open">OPEN</span>` : t.status;
     const outcomeBadge = t.correct === null || t.correct === undefined
       ? "—"
-      : (t.correct == 1
-          ? `<span class="badge correct">✓ correct</span>`
-          : `<span class="badge incorrect">✗ wrong</span>`);
+      : (t.correct == 1 ? `<span class="badge correct">✓ correct</span>` : `<span class="badge incorrect">✗ wrong</span>`);
     const conf = t.predicted_proba_up !== undefined
       ? (Math.max(t.predicted_proba_up, 1 - t.predicted_proba_up) * 100).toFixed(0) + "%"
       : "—";
 
     return `<tr>
+      <td><span class="badge symbol">${t.symbol || "—"}</span></td>
       <td>${t.timestamp ? new Date(t.timestamp).toLocaleString() : "—"}</td>
       <td>${dirBadge}</td>
       <td>${fmt(t.entry_price, 5)}</td>
@@ -185,7 +174,7 @@ function renderHistory(trades) {
     </tr>`;
   }).join("");
 
-  document.getElementById("tradeRows").innerHTML = rows || `<tr><td colspan="7">No trades yet</td></tr>`;
+  document.getElementById("tradeRows").innerHTML = rows || `<tr><td colspan="8">No trades yet</td></tr>`;
 }
 
 function renderEquityCurve(points) {
@@ -202,19 +191,7 @@ function renderEquityCurve(points) {
   const ctx = document.getElementById("equityChart").getContext("2d");
   chart = new Chart(ctx, {
     type: "line",
-    data: {
-      labels,
-      datasets: [{
-        label: "Balance",
-        data: values,
-        borderColor: "#5b8def",
-        backgroundColor: "rgba(91,141,239,0.08)",
-        fill: true,
-        tension: 0.15,
-        pointRadius: 0,
-        borderWidth: 2,
-      }],
-    },
+    data: { labels, datasets: [{ label: "Balance", data: values, borderColor: "#5b8def", backgroundColor: "rgba(91,141,239,0.08)", fill: true, tension: 0.15, pointRadius: 0, borderWidth: 2 }] },
     options: {
       responsive: true,
       plugins: { legend: { display: false } },
@@ -229,41 +206,42 @@ function renderEquityCurve(points) {
 function renderPredictNow(p) {
   const box = document.getElementById("predictBox");
   if (!p.setup_found) {
-    box.textContent = "No live setup detected right now.";
+    box.textContent = `${p.symbol || "This symbol"}: no live setup detected right now.`;
     return;
   }
   box.innerHTML =
-    `Leg-in: <b>${p.leg_in_direction}</b> · ` +
+    `<b>${p.symbol}</b> — Leg-in: <b>${p.leg_in_direction}</b> · ` +
     `Predicted breakout: <b>${p.predicted_direction}</b> · ` +
     `Confidence: <b>${(p.confidence * 100).toFixed(1)}%</b> · ` +
     `Would trade: <b style="color:${p.would_trade ? 'var(--green)' : 'var(--muted)'}">${p.would_trade ? "yes" : "no"}</b>`;
 }
 
+async function refreshPredict() {
+  const select = document.getElementById("predictSymbolSelect");
+  const symbol = select.value || (symbols[0] || "");
+  if (!symbol) return;
+  const p = await fetchJSON(`/predict_now?symbol=${encodeURIComponent(symbol)}`);
+  renderPredictNow(p);
+}
+
 async function refreshAll() {
   try {
-    const [status, history, equity, predict] = await Promise.all([
+    const [status, history, equity] = await Promise.all([
       fetchJSON("/status"),
-      fetchJSON("/history?limit=30"),
+      fetchJSON("/history?limit=40"),
       fetchJSON("/equity_curve?limit=300"),
-      fetchJSON("/predict_now"),
     ]);
     renderStatus(status);
     renderHistory(history.trades || []);
     renderEquityCurve(equity.points || []);
-    renderPredictNow(predict);
+    await refreshPredict();
   } catch (e) {
     console.error("Refresh failed", e);
   }
 }
 
-async function pauseLoop() {
-  await fetchJSON("/pause", { method: "POST" });
-  refreshAll();
-}
-async function resumeLoop() {
-  await fetchJSON("/resume", { method: "POST" });
-  refreshAll();
-}
+async function pauseLoop() { await fetchJSON("/pause", { method: "POST" }); refreshAll(); }
+async function resumeLoop() { await fetchJSON("/resume", { method: "POST" }); refreshAll(); }
 
 refreshAll();
 setInterval(refreshAll, REFRESH_MS);

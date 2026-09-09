@@ -79,16 +79,12 @@ def extract_features(close, high, low, volume, leg_in_start, base_start, base_en
         rs = avg_gain / (avg_loss + 1e-9)
         features["rsi"] = 100 - (100 / (1 + rs))
     else:
-        features["rsi"] = None  # insufficient history -- caller should skip, not fill 50
+        features["rsi"] = None
 
     return features
 
 
 def get_most_recent_base(close, high, low, volume, recency_bars=3):
-    """
-    Find the most recently completed base (if any) that finished within the last
-    `recency_bars` bars -- i.e. a genuinely 'live' setup worth predicting on right now.
-    """
     candidates = detect_candidate_bases(
         close,
         atr_window=config.ATR_WINDOW,
@@ -101,7 +97,7 @@ def get_most_recent_base(close, high, low, volume, recency_bars=3):
 
     base_start, base_end = candidates[-1]
     if base_end < len(close) - recency_bars:
-        return None  # most recent detected base is stale, not a live setup
+        return None
 
     leg_in_start = max(0, base_start - config.LEG_IN_LOOKBACK)
     feats = extract_features(

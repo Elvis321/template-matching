@@ -15,7 +15,7 @@ class PaperBroker:
         self.spread_pct = spread_pct
         self.slippage_pct = slippage_pct
         self.equity_log_path = Path(equity_log_path)
-        self.open_position = None  # only one position at a time
+        self.open_positions = {}  # symbol -> position dict
 
         self.equity_log_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.equity_log_path.exists():
@@ -30,10 +30,9 @@ class PaperBroker:
     def _execution_cost_pct(self):
         return self.spread_pct + self.slippage_pct
 
-    def open_trade(self, direction, market_price):
-        """direction: 'buy' or 'sell'. Returns the simulated fill price after cost."""
-        if self.open_position is not None:
-            raise RuntimeError("A position is already open -- close it before opening another.")
+    def open_trade(self, symbol, direction, market_price):
+        if symbol in self.open_positions:
+            raise RuntimeError(f"A position is already open on {symbol}.")
 
         cost_pct = self._execution_cost_pct() / 100
         if direction == "buy":
@@ -41,24 +40,25 @@ class PaperBroker:
         else:
             fill_price = market_price * (1 - cost_pct)
 
-        self.open_position = {
+        self.open_positions[symbol] = {
             "direction": direction,
             "entry_price": fill_price,
             "size_usd": self.position_size_usd,
             "opened_at": datetime.now(timezone.utc).isoformat(),
         }
-        logger.info("Paper trade opened: %s @ %.6f (size=$%.2f)",
-                     direction, fill_price, self.position_size_usd)
+        logger.info("Paper trade opened: %s %s @ %.6f (size=$%.2f)",
+                     symbol, direction, fill_price, self.position_size_usd)
         return fill_price
 
-    def close_trade(self, market_price):
-        if self.open_position is None:
-            raise RuntimeError("No open position to close.")
+    def close_trade(self, symbol, market_price):
+        if symbol not in self.open_positions:
+            raise RuntimeError(f"No open position on {symbol} to close.")
 
+        position = self.open_positions[symbol]
         cost_pct = self._execution_cost_pct() / 100
-        direction = self.open_position["direction"]
-        entry_price = self.open_position["entry_price"]
-        size_usd = self.open_position["size_usd"]
+        direction = position["direction"]
+        entry_price = position["entry_price"]
+        size_usd = position["size_usd"]
 
         if direction == "buy":
             fill_price = market_price * (1 - cost_pct)
@@ -70,29 +70,34 @@ class PaperBroker:
         pnl_usd = size_usd * pct_move
         self.balance += pnl_usd
 
-        logger.info("Paper trade closed: %s @ %.6f, pnl=$%.2f, new balance=$%.2f",
-                     direction, fill_price, pnl_usd, self.balance)
+        logger.info("Paper trade closed: %s %s @ %.6f, pnl=$%.2f, new balance=$%.2f",
+                     symbol, direction, fill_price, pnl_usd, self.balance)
 
-        self.open_position = None
-        self._log_equity(event=f"trade_closed pnl={pnl_usd:.2f}")
+        del self.open_positions[symbol]
+        self._log_equity(event=f"{symbol}_closed pnl={pnl_usd:.2f}")
 
         return {"exit_price": fill_price, "pnl_usd": pnl_usd, "balance": self.balance}
 
-    def has_open_position(self):
-        return self.open_position is not None
+    def has_open_position(self, symbol):
+        return symbol in self.open_positions
 
-    def equity(self, current_market_price=None):
-        """Balance plus unrealized PnL on any open position, if a current price is given."""
-        if self.open_position is None or current_market_price is None:
-            return self.balance
+    def equity(self, current_prices=None):
+        """current_prices: optional dict {symbol: price} for unrealized PnL."""
+        total = self.balance
+        if not current_prices:
+            return total
 
-        direction = self.open_position["direction"]
-        entry_price = self.open_position["entry_price"]
-        size_usd = self.open_position["size_usd"]
+        for symbol, position in self.open_positions.items():
+            price = current_prices.get(symbol)
+            if price is None:
+                continue
+            direction = position["direction"]
+            entry_price = position["entry_price"]
+            size_usd = position["size_usd"]
+            if direction == "buy":
+                pct_move = (price / entry_price - 1)
+            else:
+                pct_move = (entry_price - price) / entry_price
+            total += size_usd * pct_move
 
-        if direction == "buy":
-            pct_move = (current_market_price / entry_price - 1)
-        else:
-            pct_move = (entry_price - current_market_price) / entry_price
-
-        return self.balance + size_usd * pct_move
+        return total

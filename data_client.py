@@ -13,11 +13,15 @@ class StaleDataError(Exception):
 
 def get_recent_bars(symbol=None, interval=None, n_bars=None, max_flat_run=8):
     """
-    Fetch recent bars and run a basic sanity check for stale/duplicated data
-    (the same issue that produced the ~95% same-session-revisit artifact earlier).
+    Fetch recent bars and run a basic sanity check for stale/duplicated data.
     Raises StaleDataError if too many consecutive bars show zero price change.
+
+    NOTE on EURUSD=X vs BTC-USD: forex symbols only update during forex market
+    hours (closed weekends, thin around rollover) -- a StaleDataError on EURUSD=X
+    over a weekend is EXPECTED, not a bug. BTC-USD trades 24/7, so persistent
+    staleness there is more likely a real data feed issue worth investigating.
     """
-    symbol = symbol or config.SYMBOL
+    symbol = symbol or config.SYMBOLS[0]
     interval = interval or config.INTERVAL
     n_bars = n_bars or config.BARS_LOOKBACK
 
@@ -35,7 +39,6 @@ def get_recent_bars(symbol=None, interval=None, n_bars=None, max_flat_run=8):
 
     closes = df["Close"].values
     unchanged = (np.diff(closes) == 0).astype(int)
-    # longest run of consecutive zero-change bars at the END of the series
     tail_run = 0
     for v in unchanged[::-1]:
         if v == 1:
@@ -45,7 +48,7 @@ def get_recent_bars(symbol=None, interval=None, n_bars=None, max_flat_run=8):
     if tail_run >= max_flat_run:
         raise StaleDataError(
             f"Last {tail_run} bars for {symbol} show zero price change -- "
-            f"data feed likely stale. Skipping this cycle."
+            f"data feed likely stale (or market closed, if this is a forex symbol). Skipping this cycle."
         )
 
     df = df.reset_index()
@@ -58,13 +61,12 @@ def get_recent_bars(symbol=None, interval=None, n_bars=None, max_flat_run=8):
 
 
 def get_current_price(symbol=None):
-    symbol = symbol or config.SYMBOL
+    symbol = symbol or config.SYMBOLS[0]
     bars = get_recent_bars(symbol=symbol, n_bars=2)
     return float(bars["close"].iloc[-1])
 
 
 def _period_for_interval(interval):
-    # yfinance caps how far back intraday intervals can go
     mapping = {
         "1m": "5d", "2m": "60d", "5m": "60d", "15m": "60d",
         "30m": "60d", "60m": "730d", "1h": "730d", "1d": "5y",
