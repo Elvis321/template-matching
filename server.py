@@ -1,3 +1,16 @@
+"""
+FastAPI web server. Starts the paper trading loop automatically as a background
+task when the server starts -- this IS the "hosted on a web server" deployment.
+
+    uvicorn server:app --host 0.0.0.0 --port 8000
+
+NOTE: /status and /history read from the running engine's in-memory state
+(engine.learner.history_df) rather than re-reading trade_log.csv from disk on
+every request. This makes them robust to the CSV being manually deleted (e.g.
+via Render's Shell tab) while the app is running -- the in-memory state is the
+source of truth while the process is alive; the CSV is for persistence across
+restarts, not for serving these endpoints.
+"""
 import asyncio
 import json
 import logging
@@ -38,13 +51,16 @@ app = FastAPI(title="Zone Trader — Paper Trading", lifespan=lifespan)
 
 @app.get("/status")
 def status():
-    log_path = Path(config.TRADE_LOG_PATH)
-    if not log_path.exists() or engine is None:
+    if engine is None:
         return {"status": "starting up"}
 
-    df = pd.read_csv(log_path)
-    closed = df[df["status"] == "closed"]
-    open_trades = df[df["status"] == "open"]
+    df = engine.learner.history_df
+    if len(df) and "status" in df.columns:
+        closed = df[df["status"] == "closed"]
+        open_trades = df[df["status"] == "open"]
+    else:
+        closed = df.iloc[0:0]
+        open_trades = df.iloc[0:0]
 
     current_prices = {}
     for symbol in config.SYMBOLS:
@@ -56,7 +72,10 @@ def status():
 
     per_symbol = {}
     for symbol in config.SYMBOLS:
-        sym_closed = closed[closed.get("symbol") == symbol] if "symbol" in closed.columns else closed.iloc[0:0]
+        if len(closed) and "symbol" in closed.columns:
+            sym_closed = closed[closed["symbol"] == symbol]
+        else:
+            sym_closed = closed.iloc[0:0]
         per_symbol[symbol] = {
             "current_price": current_prices.get(symbol),
             "has_open_position": engine.broker.has_open_position(symbol),
@@ -87,12 +106,13 @@ def status():
 
 @app.get("/history")
 def history(limit: int = 50, symbol: str = None):
-    log_path = Path(config.TRADE_LOG_PATH)
-    if not log_path.exists():
+    if engine is None:
         return {"trades": []}
-    df = pd.read_csv(log_path)
+
+    df = engine.learner.history_df
     if symbol and "symbol" in df.columns:
         df = df[df["symbol"] == symbol]
+
     cols = ["symbol", "timestamp", "ticket", "direction", "entry_price", "exit_price",
             "predicted_proba_up", "predicted_class", "outcome", "correct", "status"]
     cols = [c for c in cols if c in df.columns]
