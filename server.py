@@ -1,3 +1,4 @@
+from fastapi.staticfiles import StaticFiles
 import asyncio
 import json
 import xgboost as xgb
@@ -161,3 +162,4 @@ def resume():
 @app.get("/health")
 def health():
     return {"ok": True}
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
