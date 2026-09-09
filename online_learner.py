@@ -31,6 +31,21 @@ class OnlineZoneLearner:
         if self.trade_log_path.exists():
             self.history_df = pd.read_csv(self.trade_log_path)
             logger.info("Loaded %d historical live trades from %s", len(self.history_df), self.trade_log_path)
+
+            # --- migration: older trade logs predate multi-symbol support and
+            # don't have a "symbol" column. Backfill it so downstream filtering
+            # doesn't KeyError. We can't know which symbol these old rows were
+            # actually trading, so tag them "UNKNOWN" -- they'll still count
+            # toward overall accuracy but won't be attributed to any specific
+            # symbol in the per-symbol breakdown.
+            if "symbol" not in self.history_df.columns:
+                logger.warning(
+                    "trade_log.csv predates multi-symbol support -- backfilling "
+                    "'symbol' column with 'UNKNOWN' for %d existing rows.",
+                    len(self.history_df),
+                )
+                self.history_df["symbol"] = "UNKNOWN"
+                self._save_log()
         else:
             cols = self.feature_cols + [
                 "symbol", "timestamp", "ticket", "direction", "entry_price",
@@ -97,7 +112,8 @@ class OnlineZoneLearner:
 
     def running_accuracy(self, window=50, symbol=None):
         closed = self.history_df[self.history_df["status"] == "closed"]
-        if symbol is not None:
+        # defensive check in case an even older log format sneaks through some other path
+        if symbol is not None and "symbol" in closed.columns:
             closed = closed[closed["symbol"] == symbol]
         if len(closed) == 0:
             return None
