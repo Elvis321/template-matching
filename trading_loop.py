@@ -81,6 +81,7 @@ class TradingEngine:
 
         setup = get_most_recent_base(close, high, low, volume, recency_bars=3)
         if setup is None:
+            logger.info("[%s] No live setup this cycle.", symbol)
             return
 
         features = setup["features"]
