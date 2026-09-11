@@ -1,3 +1,19 @@
+"""
+Base detection and feature extraction.
+
+IMPORTANT: this logic must stay byte-for-byte identical to whatever produced the
+training dataset in the research notebook. Any drift here (different rolling windows,
+different fallback values, different rounding) silently shifts the live feature
+distribution away from what the model was trained on -- a common and hard-to-notice
+cause of live underperformance relative to backtest.
+
+FIX (2026-09-11): removed an erroneous trailing "- atr_window" from the range in
+detect_candidate_bases. It excluded any base from ending within the last atr_window
+bars of the array -- harmless when scanning full multi-year history during training,
+but fatal for live use, where "the end of the array" is always "right now." This made
+get_most_recent_base's recency check mathematically impossible to satisfy, so no
+setup could ever be detected live, on any symbol, regardless of market conditions.
+"""
 import numpy as np
 import pandas as pd
 from config import config
@@ -8,7 +24,7 @@ def detect_candidate_bases(prices, atr_window=14, base_len_range=(3, 10), contra
     rolling_vol = pd.Series(returns).rolling(atr_window).std().values
     candidates = []
     for base_len in range(base_len_range[0], base_len_range[1] + 1):
-        for i in range(atr_window, len(prices) - base_len - atr_window):
+        for i in range(atr_window, len(prices) - base_len):
             base_vol = np.nanstd(returns[i:i + base_len])
             surrounding_vol = rolling_vol[i]
             if np.isnan(surrounding_vol) or surrounding_vol == 0:
@@ -79,12 +95,17 @@ def extract_features(close, high, low, volume, leg_in_start, base_start, base_en
         rs = avg_gain / (avg_loss + 1e-9)
         features["rsi"] = 100 - (100 / (1 + rs))
     else:
-        features["rsi"] = None
+        features["rsi"] = None  # insufficient history -- caller should skip, not fill 50
 
     return features
 
 
 def get_most_recent_base(close, high, low, volume, recency_bars=3):
+    """
+    Find the most recently completed base (if any) that finished within the last
+    `recency_bars` bars -- i.e. a genuinely 'live' setup worth predicting on right now,
+    not a stale one from earlier in the session.
+    """
     candidates = detect_candidate_bases(
         close,
         atr_window=config.ATR_WINDOW,
@@ -97,7 +118,7 @@ def get_most_recent_base(close, high, low, volume, recency_bars=3):
 
     base_start, base_end = candidates[-1]
     if base_end < len(close) - recency_bars:
-        return None
+        return None  # most recent detected base is stale, not a live setup
 
     leg_in_start = max(0, base_start - config.LEG_IN_LOOKBACK)
     feats = extract_features(
