@@ -10,7 +10,6 @@ logger = logging.getLogger("paper_broker")
 class PaperBroker:
     def __init__(self, starting_balance, position_size_usd, spread_pct, slippage_pct,
                  equity_log_path):
-        self.balance = starting_balance
         self.position_size_usd = position_size_usd
         self.spread_pct = spread_pct
         self.slippage_pct = slippage_pct
@@ -18,7 +17,28 @@ class PaperBroker:
         self.open_positions = {}  # symbol -> position dict
 
         self.equity_log_path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.equity_log_path.exists():
+
+        if self.equity_log_path.exists():
+            # restore balance from the last recorded value instead of resetting --
+            # otherwise every restart silently wipes any realized P&L
+            try:
+                with open(self.equity_log_path, "r", newline="") as f:
+                    rows = list(csv.reader(f))
+                if len(rows) > 1:  # header + at least one data row
+                    last_balance = float(rows[-1][1])
+                    self.balance = last_balance
+                    logger.info("Restored balance from %s: $%.2f (was $%.2f at startup default)",
+                                 self.equity_log_path, last_balance, starting_balance)
+                else:
+                    self.balance = starting_balance
+                    self._log_equity("initialized")
+            except (ValueError, IndexError) as e:
+                logger.warning("Could not parse existing equity log (%s) -- starting fresh at $%.2f",
+                                e, starting_balance)
+                self.balance = starting_balance
+                self._log_equity("initialized_after_parse_error")
+        else:
+            self.balance = starting_balance
             with open(self.equity_log_path, "w", newline="") as f:
                 csv.writer(f).writerow(["timestamp", "balance", "event"])
             self._log_equity("initialized")
@@ -82,7 +102,6 @@ class PaperBroker:
         return symbol in self.open_positions
 
     def equity(self, current_prices=None):
-        """current_prices: optional dict {symbol: price} for unrealized PnL."""
         total = self.balance
         if not current_prices:
             return total
